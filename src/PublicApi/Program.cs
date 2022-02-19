@@ -34,11 +34,13 @@ builder.Logging.AddConsole();
 // Requires LocalDB which can be installed with SQL Server Express 2016
 // https://www.microsoft.com/en-us/download/details.aspx?id=54284
 builder.Services.AddDbContext<CatalogContext>(c =>
-    c.UseSqlServer(builder.Configuration.GetConnectionString("CatalogConnection")));
+    c.UseSqlServer(builder.Configuration.GetConnectionString("CatalogConnection"),
+    options => options.EnableRetryOnFailure()));
 
 // Add Identity DbContext
 builder.Services.AddDbContext<AppIdentityDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("IdentityConnection")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("IdentityConnection"),
+    options => options.EnableRetryOnFailure()));
 
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
         .AddEntityFrameworkStores<AppIdentityDbContext>()

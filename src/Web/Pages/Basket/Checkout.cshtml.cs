@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.eShopWeb.ApplicationCore.DTO;
 using Microsoft.eShopWeb.ApplicationCore.Entities.OrderAggregate;
 using Microsoft.eShopWeb.ApplicationCore.Exceptions;
 using Microsoft.eShopWeb.ApplicationCore.Interfaces;
@@ -22,6 +23,8 @@ public class CheckoutModel : PageModel
     private readonly IBasketService _basketService;
     private readonly SignInManager<ApplicationUser> _signInManager;
     private readonly IOrderService _orderService;
+    private readonly IDeliveryOrderProcessorService _deliveryProcessorService;
+    private readonly IOrderItemsReserverService _orderItemsReserverService;
     private string _username = null;
     private readonly IBasketViewModelService _basketViewModelService;
     private readonly IAppLogger<CheckoutModel> _logger;
@@ -30,11 +33,15 @@ public class CheckoutModel : PageModel
         IBasketViewModelService basketViewModelService,
         SignInManager<ApplicationUser> signInManager,
         IOrderService orderService,
+        IDeliveryOrderProcessorService deliveryProcessorService,
+        IOrderItemsReserverService orderItemsReserverService,
         IAppLogger<CheckoutModel> logger)
     {
         _basketService = basketService;
         _signInManager = signInManager;
         _orderService = orderService;
+        _deliveryProcessorService = deliveryProcessorService;
+        _orderItemsReserverService = orderItemsReserverService;
         _basketViewModelService = basketViewModelService;
         _logger = logger;
     }
@@ -57,10 +64,16 @@ public class CheckoutModel : PageModel
                 return BadRequest();
             }
 
+            var shippingAddress = new Address("123 Main St.", "Kent", "OH", "United States", "44240");
             var updateModel = items.ToDictionary(b => b.Id.ToString(), b => b.Quantity);
             await _basketService.SetQuantities(BasketModel.Id, updateModel);
-            await _orderService.CreateOrderAsync(BasketModel.Id, new Address("123 Main St.", "Kent", "OH", "United States", "44240"));
+            await _orderService.CreateOrderAsync(BasketModel.Id, shippingAddress);
             await _basketService.DeleteBasketAsync(BasketModel.Id);
+
+            var orderItemstDto = BasketModel.Items.Select(item => new OrderItemDto(item.Id, item.ProductName, item.Quantity, item.UnitPrice));
+            var orderDto = new OrderDto(orderItemstDto, shippingAddress, BasketModel.BuyerId);
+            await ProcessOrderDeliveryAsync(shippingAddress, orderDto);
+            await ReserveOrderedItemsAsync(orderDto);
         }
         catch (EmptyBasketOnCheckoutException emptyBasketOnCheckoutException)
         {
@@ -70,6 +83,32 @@ public class CheckoutModel : PageModel
         }
 
         return RedirectToPage("Success");
+    }
+
+    private async Task ProcessOrderDeliveryAsync(Address address, OrderDto orderDto)
+    {
+        // Non-critical failures should not disrupt main order flow
+        try
+        {
+            await _deliveryProcessorService.ProcessOrderAsync(orderDto);
+        }
+        catch
+        {
+            _logger.LogWarning("Process order delivery failed. Contact our support.");
+        }
+    }
+
+    private async Task ReserveOrderedItemsAsync(OrderDto orderDto)
+    {
+        // Non-critical failures should not disrupt main order flow
+        try
+        {
+            await _orderItemsReserverService.ReserveItems(orderDto);
+        }
+        catch
+        {
+            _logger.LogWarning("Items for your order were not reserved. Contact our support.");
+        }
     }
 
     private async Task SetBasketModelAsync()
